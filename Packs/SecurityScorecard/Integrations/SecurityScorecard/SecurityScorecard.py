@@ -260,29 +260,14 @@ class SecurityScorecardClient(BaseClient):
 
 
 """ HELPER FUNCTIONS """
-
-
-def incidents_to_import(alerts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-
-    """
-    Helper function to filter events that need to be imported.
-    It filters the events based on the `created_at` timestamp.
-    Function will only be called if the SecurityScorecard API returns more than one alert.
-
-    Args:
-        ``alerts``(``List[Dict[str, Any]]``): A list of alerts to sort through.
-
-    Returns:
-        ``List[Dict[str, Any]]``: Events to import
-    """
-
+def get_last_run(last_run, params):
     # Check for existence of last run
     # When integration runs for the first time, it will not exist
     # Set 3 days by default if the first fetch parameter is not set
-    if demisto.getLastRun().get("last_run"):
-        last_run = int(demisto.getLastRun().get("last_run"))
+    if last_run:
+        return int(last_run.get("last_run"))
     else:
-        days_ago_arg = demisto.params().get("first_fetch")
+        days_ago_arg = params.get("first_fetch")
 
         if not days_ago_arg:
             days_ago_str = "3 days"
@@ -298,59 +283,73 @@ def incidents_to_import(alerts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         demisto.debug(f"getLastRun is None in integration context, using parameter 'first_fetch' value '{days_ago_arg}'")
         demisto.debug(f"{days_ago_str} => {valid_fetch_days_ago}")
 
-        last_run = int(valid_fetch_days_ago.timestamp())
+        return int(valid_fetch_days_ago.timestamp())
+
+def incidents_to_import(
+    alerts: List[Dict[str, Any]], 
+    last_run=demisto.getLastRun()
+    ) -> List[Dict[str, Any]]:
+
+    """
+    Helper function to filter events that need to be imported.
+    It filters the events based on the `created_at` timestamp.
+    Function will only be called if the SecurityScorecard API returns more than one alert.
+
+    Args:
+        ``alerts``(``List[Dict[str, Any]]``): A list of alerts to sort through.
+
+    Returns:
+        ``List[Dict[str, Any]]``: Events to import
+    """
+    last_run = get_last_run(last_run, demisto.params())
 
     demisto.debug(f"Last run timestamp: {last_run}")
 
     incidents_to_import: List[Dict[str, Any]] = []
 
-    alerts_returned = len(alerts)
-    demisto.debug(f"Number of alerts found: {alerts_returned}")
+    demisto.debug(f"Number of alerts found: {len(alerts)}")
     # Check if there are more than 0 alerts
-    if alerts_returned > 0:
 
-        # The alerts are sorted by descending date so first alert is the most recent
-        most_recent_alert = alerts[0]
+    # The alerts are sorted by descending date so first alert is the most recent
+    most_recent_alert = alerts[0]
 
-        most_recent_alert_created_date = most_recent_alert.get("created_at")
+    most_recent_alert_created_date = most_recent_alert.get("created_at")
 
-        most_recent_alert_timestamp = \
-            int(datetime.strptime(most_recent_alert_created_date, SECURITYSCORECARD_DATE_FORMAT).timestamp())  # type: ignore
-        demisto.debug(f"Setting last runtime as alert most recent timestamp: {most_recent_alert_timestamp}")
-        demisto.setLastRun({
-            'last_run': most_recent_alert_timestamp
-        })
+    most_recent_alert_timestamp = \
+        int(datetime.strptime(most_recent_alert_created_date, SECURITYSCORECARD_DATE_FORMAT).timestamp())  # type: ignore
+    demisto.debug(f"Setting last runtime as alert most recent timestamp: {most_recent_alert_timestamp}")
+    demisto.setLastRun({
+        'last_run': most_recent_alert_timestamp
+    })  # TODO: remove it 
 
-        for alert in alerts:
+    for alert in alerts:
 
-            alert_created_at = alert.get("created_at")
-            alert_timestamp = int(datetime.strptime(alert_created_at, SECURITYSCORECARD_DATE_FORMAT).timestamp())  # type: ignore
+        alert_created_at = alert.get("created_at")
+        alert_timestamp = int(datetime.strptime(alert_created_at, SECURITYSCORECARD_DATE_FORMAT).timestamp())  # type: ignore
 
-            alert_id = alert.get("id")
+        alert_id = alert.get("id")
 
-            debug_msg = f"""
-            last_run: {last_run}, alert_timestamp: {alert_timestamp},
-            should import alert '{alert_id}'? (last_run < alert_timestamp): {(last_run < alert_timestamp)}
-            """
-            demisto.debug(debug_msg)
+        debug_msg = f"""
+        last_run: {last_run}, alert_timestamp: {alert_timestamp},
+        should import alert '{alert_id}'? (last_run < alert_timestamp): {(last_run < alert_timestamp)}
+        """
+        demisto.debug(debug_msg)
 
-            if alert_timestamp > last_run:
-                incident = {}
-                incident["name"] = f"SecurityScorecard '{alert.get('change_type')}' Incident"
-                incident["occurred"] = \
-                    datetime.strptime(alert_created_at, SECURITYSCORECARD_DATE_FORMAT).strftime(DATE_FORMAT)  # type: ignore
-                incident["rawJSON"] = json.dumps(alert)
-                incidents_to_import.append(incident)
+        if alert_timestamp > last_run:
+            incident = {}
+            incident["name"] = f"SecurityScorecard '{alert.get('change_type')}' Incident"
+            incident["occurred"] = \
+                datetime.strptime(alert_created_at, SECURITYSCORECARD_DATE_FORMAT).strftime(DATE_FORMAT)  # type: ignore
+            incident["rawJSON"] = json.dumps(alert)
+            incidents_to_import.append(incident)
     # If there are no alerts then we can't use the most recent alert timestamp
     # So we'll use now as the last run timestamp
     else:
         now = int(datetime.utcnow().timestamp())
         demisto.debug(f"No alerts retrieved, setting last_run to now ({now})")
-        demisto.setLastRun({
-            'last_run': now
-        })
 
-    return incidents_to_import
+
+    return incidents_to_import, {'last_run': now}
 
 
 """ COMMAND FUNCTIONS """

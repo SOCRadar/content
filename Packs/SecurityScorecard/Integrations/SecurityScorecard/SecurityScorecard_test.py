@@ -1,12 +1,14 @@
 from SecurityScorecard import \
     SecurityScorecardClient, \
     DATE_FORMAT, \
-    incidents_to_import
+    incidents_to_import, \
+    get_last_run
 
 import json
 import io
 import datetime
-
+import pytest
+from freezegun import freeze_time
 """ Helper Functions Test Data"""
 
 
@@ -31,6 +33,16 @@ create_score_alert_mock = load_json("./test_data/alerts/create_score_alert.json"
 services_mock = load_json("./test_data/companies/services.json")
 
 """ Helper Functions Unit Tests"""
+
+
+@freeze_time('2021-07-27')
+@pytest.mark.parametrize('last_run, first_fetch', [
+    ({}, '3 days'),
+    ({'last_run': '1627074000'}, '3 days')
+])
+def test_get_last_run(last_run: dict, first_fetch: str):
+    time_result = get_last_run(last_run, {'first_fetch': first_fetch})
+    assert time_result == datetime.datetime(2021, 7, 24).timestamp()
 
 
 def test_incidents_to_import(mocker):
